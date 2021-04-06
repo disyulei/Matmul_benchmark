@@ -30,6 +30,9 @@ TEST(Matrix, zeros) {
 
     auto b = Matrix<float>::zeros(3, 2);
     cout << b << endl;
+
+    auto c(b);
+    cout << c << endl;
 }
 
 
@@ -45,6 +48,15 @@ TEST(Matrix, randn) {
     auto a = Matrix<float>::randn(5, 5);
     cout << "Random:" << a << endl;
 }
+
+TEST(Matrix, submat) {
+    auto a = Matrix<float>::randn(10, 10);
+    Matrix<float> b(a, 2, 2, 2, 2);
+    cout << "A:" << a << "\n sub from (2,2):" << b ;
+    Matrix<float>  c(a, 3, 3, 3, 3);
+    cout << "\nsub from (3,3):" << c << endl;
+}
+
 
 TEST(Matrix, matmul) {
     auto A = Matrix<float>::randn(5, 5);

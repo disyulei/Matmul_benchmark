@@ -28,6 +28,7 @@ class Matrix {
 private:
     int _rows;
     int _cols;
+    int _stride;
     Dtype* _data {nullptr};
     Dtype* _d_data {nullptr};
     Backend _backend; 
@@ -49,65 +50,80 @@ public:
     Matrix(Dtype* data, const int rows, const int cols) { // deep copy 
         _rows = rows;
         _cols = cols;
+	_stride = cols;
         _backend = Backend::CPU;
+
         //_data = new Dtype[rows*cols];
-	    _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
+        _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
         for(size_t i = 0; i < this->numel(); ++i) _data[i] = data[i]; 
-	    _count = new int;
-	    *_count = 1;
+        _count = new int;
+        *_count = 1;
     }
     Matrix(const int rows, const int cols) { // deep copy
         assert(rows > 0 && cols > 0);
-        this->_rows = rows;
-        this->_cols = cols;
+        _rows = rows;
+        _cols = cols;
+	_stride = cols;
         //_data = new Dtype[rows*cols]; 
-	    _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
+        _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
         _backend = Backend::CPU;
-	    _count = new int;
-	    *_count = 1;
+        _count = new int;
+        *_count = 1;
     }
     Matrix(const Matrix<Dtype>& rhs) { // shadow copy
         _rows = rhs._rows;
         _cols = rhs._cols;
+	_stride = rhs._stride;
         _backend = rhs._backend;
-	    _data = rhs._data;
-	    _d_data = rhs._d_data;
-	    _count = rhs._count;
+        _data = rhs._data;
+        _d_data = rhs._d_data;
+        _count = rhs._count;
         (*_count) ++;
     }
     Matrix& operator=(const Matrix<Dtype>& rhs) { // shadow copy
         if (&rhs != this) {
             if(_d_data) {
-		        if (--(*_count) == 0) {
+                if (--(*_count) == 0) {
                     _free();
-		        }
+                }
             }
-	        _data = rhs._data;
-	        _d_data = rhs._d_data;
-	        _count = rhs._count;
-	        _backend = rhs._backend;
-	        _rows = rhs._rows;
-	        _cols = rhs._cols;
-	        (*_count) ++;
+            _data = rhs._data;
+            _d_data = rhs._d_data;
+            _count = rhs._count;
+            _backend = rhs._backend;
+            _rows = rhs._rows;
+            _cols = rhs._cols;
+	    _stride = rhs._stride;
+            (*_count) ++;
         }
         return *this;
     }
+    Matrix(const Matrix<Dtype>& rhs, const int x, const int y, const int w, const int h) { //sub-matrix, not deep copy
+        _data = rhs._data + y * rhs.stride() + x;  	  
+	_rows = h;
+	_cols = w;
+	_stride = rhs.stride();
+	_backend = rhs._backend;
+	_count = new int;
+	*_count = INT_MIN+110; // the _data is impossibly be released 
+    }	    
     ~Matrix() {
         if (--(*_count) == 0) {
-	        _free();
-	    }
+            _free();
+        }
     }
     int rows() const {return _rows;}
     int cols() const {return _cols;}
+    int stride() const {return _stride;}
     size_t numel() const {return _rows * _cols;}
     Dtype* data() {return _data;}
     const Dtype* data() const {return _data;}
 
     Dtype* operator[] (const int i) {
-        return _data + i * _cols ;
+        return _data + i * _stride ;
     }
     const Dtype* operator[] (const int i) const {
-        return _data + i * _cols;
+        return _data + i * _stride;
     }
     Matrix<Dtype>& cuda() {
         assert (_data != nullptr);
