@@ -111,13 +111,30 @@ TEST(Matrix, benchmark) {
 
     auto C5 = Matrix<float>::zeros(N, N);
     start = high_resolution_clock::now();
-    B = B.cpu().transpose();
-    matmul_trans(A.cpu(), B, C5);
+    matmul_trans(A.cpu(), B.cpu().transpose(), C5);
     end   = high_resolution_clock::now();
     duration = std::chrono::duration<float, std::milli>(end - start).count();
     cout << "matmul trans cost:" << duration << " ms" << endl;
     
     ASSERT_LE((C1 - C5).max(), 1e-5);
+
+    auto C6 = Matrix<float>::zeros(N, N);
+    start = high_resolution_clock::now();
+    matmul_omp_sse(A.cpu(), B.cpu().transpose(), C6);
+    end   = high_resolution_clock::now();
+    duration = std::chrono::duration<float, std::milli>(end - start).count();
+    cout << "matmul sse cost:" << duration << " ms" << endl;
+    
+    ASSERT_LE((C1 - C6).max(), 1e-5);
+
+    C6 = Matrix<float>::zeros(N, N);
+    start = high_resolution_clock::now();
+    matmul_omp_avx(A.cpu(), B.cpu().transpose(), C6);
+    end   = high_resolution_clock::now();
+    duration = std::chrono::duration<float, std::milli>(end - start).count();
+    cout << "matmul avx cost:" << duration << " ms" << endl;
+    
+    ASSERT_LE((C1 - C6).max(), 1e-5);
 
 }
 

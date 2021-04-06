@@ -36,14 +36,16 @@ public:
         _rows = rows;
         _cols = cols;
         _backend = Backend::CPU;
-        _data = new Dtype[rows*cols];
+        //_data = new Dtype[rows*cols];
+	    _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype))); // force the data aligned with 32 bytes, required by AVX 
         for(size_t i = 0; i < this->numel(); ++i) _data[i] = data[i]; 
     }
     Matrix(const int rows, const int cols) {
         assert(rows > 0 && cols > 0);
         this->_rows = rows;
         this->_cols = cols;
-        _data = new Dtype[rows*cols]; 
+        //_data = new Dtype[rows*cols]; 
+	    _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
         _backend = Backend::CPU;
     }
     Matrix()=delete; 
@@ -52,7 +54,9 @@ public:
         _cols = rhs._cols;
         _backend = rhs._backend;
         if (rhs.numel() > 0) {
-            _data = new Dtype[rhs.numel()];
+            //_data = new Dtype[rhs.numel()];
+	        _data = static_cast<Dtype*>(aligned_alloc(32, rhs.numel()*sizeof(Dtype)));
+
             for(size_t i = 0; i < rhs.numel(); ++i) _data[i] = rhs.data()[i]; 
             if (rhs._d_data && rhs._backend == Backend::GPU) {
                 CHECK_CUDA(cudaMalloc((void**)&_d_data, sizeof(Dtype) * _rows * _cols));
@@ -66,7 +70,8 @@ public:
             _cols = rhs._cols;
             _backend = rhs._backend;
             if (rhs.numel() > 0) {
-                _data = new Dtype[rhs.numel()];
+                //_data = new Dtype[rhs.numel()];
+	            _data = static_cast<Dtype*>(aligned_alloc(32, rhs.numel()*sizeof(Dtype)));
                 for(size_t i = 0; i < rhs.numel(); ++i) _data[i] = rhs.data()[i]; 
                 if (rhs._d_data && rhs._backend == Backend::GPU) {
                     CHECK_CUDA(cudaMalloc((void**)&_d_data, sizeof(Dtype) * _rows * _cols));
@@ -192,6 +197,8 @@ public:
 
 };
 
+
+
 template <typename Dtype>
 void matmul_naive(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>& C);
 
@@ -206,4 +213,11 @@ void matmul_cuda_shared(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<D
 
 template <typename Dtype>
 void matmul_trans(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>& C);
+
+
+template <typename Dtype>
+void matmul_omp_sse(const Matrix<Dtype>& A, const Matrix<Dtype>& Bt, Matrix<Dtype>& C);
+
+template <typename Dtype>
+void matmul_omp_avx(const Matrix<Dtype>& A, const Matrix<Dtype>& Bt, Matrix<Dtype>& C);
 
