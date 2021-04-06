@@ -26,70 +26,76 @@ enum class Backend {
 template <typename Dtype>
 class Matrix {
 private:
-    Dtype* _data {nullptr};
-    Dtype* _d_data {nullptr};
     int _rows;
     int _cols;
+    Dtype* _data {nullptr};
+    Dtype* _d_data {nullptr};
     Backend _backend; 
+    int* _count; 
+
+    void _free() {
+       if(_data) { 
+           delete [] _data; 
+           _data = nullptr;
+       }
+       if(_d_data) {
+           CHECK_CUDA(cudaFree(_d_data));
+           _d_data = nullptr;
+       }
+       delete this->_count;
+    }
 public:
-    Matrix(Dtype* data, const int rows, const int cols) {
+    Matrix() = delete;  
+    Matrix(Dtype* data, const int rows, const int cols) { // deep copy 
         _rows = rows;
         _cols = cols;
         _backend = Backend::CPU;
         //_data = new Dtype[rows*cols];
-	    _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype))); // force the data aligned with 32 bytes, required by AVX 
+	    _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
         for(size_t i = 0; i < this->numel(); ++i) _data[i] = data[i]; 
+	    _count = new int;
+	    *_count = 1;
     }
-    Matrix(const int rows, const int cols) {
+    Matrix(const int rows, const int cols) { // deep copy
         assert(rows > 0 && cols > 0);
         this->_rows = rows;
         this->_cols = cols;
         //_data = new Dtype[rows*cols]; 
 	    _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
         _backend = Backend::CPU;
+	    _count = new int;
+	    *_count = 1;
     }
-    Matrix()=delete; 
-    Matrix(const Matrix<Dtype>& rhs) {
+    Matrix(const Matrix<Dtype>& rhs) { // shadow copy
         _rows = rhs._rows;
         _cols = rhs._cols;
         _backend = rhs._backend;
-        if (rhs.numel() > 0) {
-            //_data = new Dtype[rhs.numel()];
-	        _data = static_cast<Dtype*>(aligned_alloc(32, rhs.numel()*sizeof(Dtype)));
-
-            for(size_t i = 0; i < rhs.numel(); ++i) _data[i] = rhs.data()[i]; 
-            if (rhs._d_data && rhs._backend == Backend::GPU) {
-                CHECK_CUDA(cudaMalloc((void**)&_d_data, sizeof(Dtype) * _rows * _cols));
-                CHECK_CUDA(cudaMemcpy(_d_data, rhs._d_data, sizeof(Dtype) * _rows * _cols, cudaMemcpyDeviceToDevice));
-            }
-        }
+	    _data = rhs._data;
+	    _d_data = rhs._d_data;
+	    _count = rhs._count;
+        (*_count) ++;
     }
-    Matrix& operator=(const Matrix<Dtype>& rhs) {
+    Matrix& operator=(const Matrix<Dtype>& rhs) { // shadow copy
         if (&rhs != this) {
-            _rows = rhs._rows;
-            _cols = rhs._cols;
-            _backend = rhs._backend;
-            if (rhs.numel() > 0) {
-                //_data = new Dtype[rhs.numel()];
-	            _data = static_cast<Dtype*>(aligned_alloc(32, rhs.numel()*sizeof(Dtype)));
-                for(size_t i = 0; i < rhs.numel(); ++i) _data[i] = rhs.data()[i]; 
-                if (rhs._d_data && rhs._backend == Backend::GPU) {
-                    CHECK_CUDA(cudaMalloc((void**)&_d_data, sizeof(Dtype) * _rows * _cols));
-                    CHECK_CUDA(cudaMemcpy(_d_data, rhs._d_data, sizeof(Dtype) * _rows * _cols, cudaMemcpyDeviceToDevice));
-                }
+            if(_d_data) {
+		        if (--(*_count) == 0) {
+                    _free();
+		        }
             }
+	        _data = rhs._data;
+	        _d_data = rhs._d_data;
+	        _count = rhs._count;
+	        _backend = rhs._backend;
+	        _rows = rhs._rows;
+	        _cols = rhs._cols;
+	        (*_count) ++;
         }
         return *this;
     }
     ~Matrix() {
-        if(_data) { 
-            delete [] _data; 
-            _data = nullptr;
-        }
-        if(_d_data) {
-            CHECK_CUDA(cudaFree(_d_data));
-            _d_data = nullptr;
-        }
+        if (--(*_count) == 0) {
+	        _free();
+	    }
     }
     int rows() const {return _rows;}
     int cols() const {return _cols;}
@@ -128,24 +134,24 @@ public:
     void* gpu_data() const { return reinterpret_cast<void*>(_d_data); }
 
     static Matrix<Dtype> zeros(const int rows, const int cols) {
-        Matrix<Dtype>* tmp = new Matrix<Dtype>(rows, cols);
-        for(size_t i = 0; i < rows*cols; ++i) tmp->data()[i] = 0;
-        return *tmp;
+        Matrix<Dtype> tmp(rows, cols);
+        for(size_t i = 0; i < rows*cols; ++i) tmp.data()[i] = 0;
+        return tmp;
     }
     static Matrix<Dtype> ones(const int rows, const int cols) {
-        Matrix<Dtype>* tmp = new Matrix<Dtype>(rows, cols);
-        for(size_t i = 0; i < rows*cols; ++i) tmp->data()[i] = 1;
-        return *tmp;
+        Matrix<Dtype> tmp (rows, cols);
+        for(size_t i = 0; i < rows*cols; ++i) tmp.data()[i] = 1;
+        return tmp;
     }
     static Matrix<Dtype> randn(const int rows, const int cols) {
-        auto tmp = new Matrix<Dtype>(rows, cols);
+        Matrix<Dtype> tmp (rows, cols);
         //const int seed = 0;
         unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
         std::default_random_engine gen(seed);
         std::normal_distribution<double> dis(0,1);
-        for(size_t i = 0; i < rows*cols; ++i) tmp->data()[i] = static_cast<Dtype>(dis(gen));
+        for(size_t i = 0; i < rows*cols; ++i) tmp.data()[i] = static_cast<Dtype>(dis(gen));
 
-        return *tmp;
+        return tmp;
     }
 
     Matrix<Dtype> operator-(const Matrix<Dtype>& rhs) {

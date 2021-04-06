@@ -45,7 +45,31 @@ for(int i = 0; i < A.rows; ++i) {
 
 - Using SIMD (CPU): Intel SSE, AVX instructions, etc.
 
-- Strassen : 
+- Strassen (Divide and Conquer): 
+1. naive
+```
+A = [a, b; c, d] B = [e, f; g, h]  C=A*B=[ae +bg, af+bh; ce+dg, cf+dh]
+```
+which needs 8 multiplications and 4 additions. the time complexity 
+```
+
+T(n) = 8T(n/2) + O(n^2)
+T(n) = O(n^log2(8)) = O(n^3)
+```
+2. strassen 
+```
+A = [a, b; c, d] B = [e, f; g, h]  C=A*B
+p1 = a(f-h), p2 = (a+b)h
+p3 = (c+d)e, p4 = d(g-e)
+p5 = (a+d)(e+h), p6 = (b-d)(g+h)
+p7 = (a-c)(e+f)
+
+C = [p5+p4-p2+p6, p1+p2; p3+p4, p1+p5-p3-p7]
+```
+```
+T(n) = 7T(n/2) + O(n^2)
+T(n) = O(n^log2(7)) ~ O(n^2.8074)
+```
 
 
 ## Benchmark
