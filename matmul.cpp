@@ -4,6 +4,22 @@
 
 #include "matmul.hpp"
 
+static inline float _mm_reduce_add_ps(__m128 x128) {
+    const __m128 x64 = _mm_add_ps(x128, _mm_movehl_ps(x128, x128));
+    const __m128 x32 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
+    return _mm_cvtss_f32(x32);
+}
+static inline float _mm256_reduce_add_ps(__m256 x) {
+    /* ( x3+x7, x2+x6, x1+x5, x0+x4 ) */
+    const __m128 x128 = _mm_add_ps(_mm256_extractf128_ps(x, 1), _mm256_castps256_ps128(x));
+    /* ( -, -, x1+x3+x5+x7, x0+x2+x4+x6 ) */
+    const __m128 x64 = _mm_add_ps(x128, _mm_movehl_ps(x128, x128));
+    /* ( -, -, -, x0+x1+x2+x3+x4+x5+x6+x7 ) */
+    const __m128 x32 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
+    /* Conversion to float is a no-op on x86-64 */
+    return _mm_cvtss_f32(x32);
+}
+
 
 template <typename Dtype>
 void matmul_naive(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>& C) {
@@ -39,7 +55,7 @@ void matmul_openmp(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>
 
 template <typename Dtype>
 void matmul_trans(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>& C) {
-    assert (A.rows() == C.rows() && A.cols() == B.rows() && B.cols() == C.cols());
+    assert (A.rows() == C.rows() && A.cols() == B.cols() && B.rows() == C.cols());
     int i, j;
     for(i = 0; i < C.rows(); ++i) {
         for(j = 0; j < C.cols(); ++j) {
@@ -52,8 +68,31 @@ void matmul_trans(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>&
     }
 }
 
+#define BLOCK_SIZE 32
 
+template <typename Dtype>
+void matmul_trans_block(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>& C) {
+    assert (A.rows() == C.rows() && A.cols() == B.cols() && B.rows() == C.cols());
+    int i, j, k;
+    int ib, jb, kb;
+    if (A.rows() < BLOCK_SIZE) { matmul_trans(A, B, C); return; }
 
+    for(i = 0; i < A.rows(); i += BLOCK_SIZE) {
+        for(j = 0; j < B.rows(); j += BLOCK_SIZE) {
+            for(k = 0; k < A.cols(); k += BLOCK_SIZE) {
+            // block matmul
+	    for(ib = i; ib < i + BLOCK_SIZE ; ++ib) {
+               for(jb = j; jb < j + BLOCK_SIZE ; ++jb) {
+                  for(kb = k; kb < k + BLOCK_SIZE ; ++kb) {
+                     C[ib][jb] += A[ib][kb] * B[jb][kb];
+                  }			  
+	       }	       
+            }
+            }		    
+        }
+    }
+
+}
 
 
 template <typename Dtype>
@@ -79,21 +118,19 @@ void matmul_cuda_shared(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<D
 template <>
 void matmul_omp_sse(const Matrix<float>& A, const Matrix<float>& Bt, Matrix<float>& C) {
     // data must be aligned with 16 bytes
-    int i, j;
+    int i, j, k;
     #pragma omp parallel for private(i, j)
     for(i = 0; i < C.rows(); ++i) {
 	for(j = 0; j < C.cols(); ++j) {
 	    __m128 partial_sum = _mm_setzero_ps();
 
-            for(int k = 0; k < A.cols() / 4; ++k) {
+            for(k = 0; k < A.cols() / 4; ++k) {
                 auto a = _mm_load_ps(A.data() + i * A.cols() + 4 * k);
                 auto b = _mm_load_ps(Bt.data() + j * Bt.cols() + 4 * k);
                 auto c = _mm_mul_ps(a, b); 
 	        partial_sum = _mm_add_ps(partial_sum, c);	
             }
-	    __attribute__ ((aligned (16))) float addr[4];
-	    _mm_store_ps(addr, partial_sum);
-	    C[i][j] = addr[0] + addr[1] + addr[2] + addr[3];
+	    C[i][j]  = _mm_reduce_add_ps(partial_sum);
 	}
     }
 }
@@ -101,29 +138,42 @@ void matmul_omp_sse(const Matrix<float>& A, const Matrix<float>& Bt, Matrix<floa
 template <>
 void matmul_omp_avx(const Matrix<float>& A, const Matrix<float>& Bt, Matrix<float>& C) {
     // data must be aligned with 32 bytes
-    int i, j;
+    int i, j, k; 
     #pragma omp parallel for private(i, j)
     for(i = 0; i < C.rows(); ++i) {
 	for(j = 0; j < C.cols(); ++j) {
 	    auto partial_sum = _mm256_setzero_ps();
-	    int k ; 
             for(k = 0; k < A.cols() / 8; ++k) {
                 auto a = _mm256_load_ps(A.data() + i * A.cols() + 8 * k);
                 auto b = _mm256_load_ps(Bt.data() + j * Bt.cols() + 8 * k);
                 auto c = _mm256_mul_ps(a, b); 
 	        partial_sum = _mm256_add_ps(partial_sum, c);	
             }
-	    __attribute__ ((aligned (32))) float addr[8];
-	    _mm256_store_ps(addr, partial_sum);
+	    C[i][j] = _mm256_reduce_add_ps(partial_sum);
+	}
+    }
+}
 
-	    C[i][j] = addr[0] + addr[1] + addr[2] + addr[3] +
-		    addr[4] + addr[5] + addr[6] + addr[7];
+template <>
+void matmul_omp_avx512(const Matrix<float>& A, const Matrix<float>& Bt, Matrix<float>& C) {
+    // data must be aligned with 32 bytes
+    int i, j, k; 
+    #pragma omp parallel for private(i, j)
+    for(i = 0; i < C.rows(); ++i) {
+	for(j = 0; j < C.cols(); ++j) {
+	    __m512 partial_sum = _mm512_set1_ps(0.0);
+            for(k = 0; k < A.cols() / 16; ++k) {
+                auto a = _mm512_loadu_ps(A.data() + i * A.cols() + 16 * k);
+                auto b = _mm512_loadu_ps(Bt.data() + j * Bt.cols() + 16 * k);
+		partial_sum = _mm512_fmadd_ps(a, b, partial_sum);
+            }
+	    C[i][j] = _mm512_reduce_add_ps(partial_sum);
 	}
     }
 }
 
 template <typename Dtype>
-__inline__ void _strassen_2x2(const Dtype* a, const int stride_a, 
+inline void _strassen_2x2(const Dtype* a, const int stride_a, 
 		const Dtype* b, const int stride_b,
 		Dtype* c, const int stride_c) {
     Dtype p1 = (b[1] - b[stride_b + 1]) * a[0];
@@ -147,7 +197,7 @@ void matmul_strassen(const Matrix<Dtype>& A,
 		Matrix<Dtype>& C) {
      assert (A.rows() == A.cols());
      const int n = A.rows();
-     assert ((n & n-1) == 0);
+     assert ((n & (n-1)) == 0);
      if (n == 2) {
 	_strassen_2x2(A.data(), A.stride(), B.data(), B.stride(), C.data(), C.stride());
 	//n=1, C.data()[0] = A.data()[0] * B.data()[0];
@@ -239,6 +289,12 @@ template void matmul_trans(const Matrix<float>&, const Matrix<float>&, Matrix<fl
 template void matmul_trans(const Matrix<double>&, const Matrix<double>&, Matrix<double>& );
 template void matmul_trans(const Matrix<int>&, const Matrix<int>&, Matrix<int>& );
 
+template void matmul_trans_block(const Matrix<float>&, const Matrix<float>&, Matrix<float>& );
+template void matmul_trans_block(const Matrix<double>&, const Matrix<double>&, Matrix<double>& );
+template void matmul_trans_block(const Matrix<int>&, const Matrix<int>&, Matrix<int>& );
+
 template void matmul_strassen(const Matrix<float>&, const Matrix<float>&, Matrix<float>& );
 template void matmul_strassen(const Matrix<double>&, const Matrix<double>&, Matrix<double>& );
 template void matmul_strassen(const Matrix<int>&, const Matrix<int>&, Matrix<int>& );
+
+

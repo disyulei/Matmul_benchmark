@@ -163,21 +163,21 @@ public:
 
     static Matrix<Dtype> zeros(const int rows, const int cols) {
         Matrix<Dtype> tmp(rows, cols);
-        for(size_t i = 0; i < rows*cols; ++i) tmp.data()[i] = 0;
+        for(size_t i = 0; i < tmp.numel(); ++i) tmp.data()[i] = 0;
         return tmp;
     }
     static Matrix<Dtype> ones(const int rows, const int cols) {
         Matrix<Dtype> tmp (rows, cols);
-        for(size_t i = 0; i < rows*cols; ++i) tmp.data()[i] = 1;
+        for(size_t i = 0; i < tmp.numel(); ++i) tmp.data()[i] = 1;
         return tmp;
     }
     static Matrix<Dtype> randn(const int rows, const int cols) {
         Matrix<Dtype> tmp (rows, cols);
         //const int seed = 0;
-        unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
+        size_t seed = std::chrono::system_clock::now().time_since_epoch().count();
         std::default_random_engine gen(seed);
-        std::normal_distribution<double> dis(0,1);
-        for(size_t i = 0; i < rows*cols; ++i) tmp.data()[i] = static_cast<Dtype>(dis(gen));
+        std::normal_distribution<double> dis(0, 1);
+        for(size_t i = 0; i < tmp.numel(); ++i) tmp.data()[i] = static_cast<Dtype>(dis(gen));
 
         return tmp;
     }
@@ -264,9 +264,9 @@ public:
         Matrix<Dtype> dst(_cols, _rows);
 	int i, j;
         #pragma omp parallel for private(i, j)
-        for(i = 0; i < _rows; ++i) {
-            for(j = 0; j < _cols; ++j) {
-                dst[j][i] = (*this)[i][j];
+        for(i = 0; i < dst.rows(); ++i) {
+            for(j = 0; j < dst.cols(); ++j) {
+                dst[i][j] = (*this)[j][i];
             }
         }
         return dst;
@@ -305,7 +305,10 @@ template <typename Dtype>
 void matmul_cuda_shared(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>& C);
 
 template <typename Dtype>
-void matmul_trans(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>& C);
+void matmul_trans(const Matrix<Dtype>& A, const Matrix<Dtype>& Bt, Matrix<Dtype>& C);
+
+template <typename Dtype>
+void matmul_trans_block(const Matrix<Dtype>& A, const Matrix<Dtype>& Bt, Matrix<Dtype>& C);
 
 
 template <typename Dtype>
@@ -313,6 +316,8 @@ void matmul_omp_sse(const Matrix<Dtype>& A, const Matrix<Dtype>& Bt, Matrix<Dtyp
 
 template <typename Dtype>
 void matmul_omp_avx(const Matrix<Dtype>& A, const Matrix<Dtype>& Bt, Matrix<Dtype>& C);
+template <typename Dtype>
+void matmul_omp_avx512(const Matrix<Dtype>& A, const Matrix<Dtype>& Bt, Matrix<Dtype>& C);
 
 template <typename Dtype>
 void matmul_strassen(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>& C);

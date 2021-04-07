@@ -11,8 +11,7 @@ __global__ void matmul_naive(const Dtype* A,
     int xIndex = threadIdx.x + blockIdx.x * blockDim.x;
     int yIndex = threadIdx.y + blockIdx.y * blockDim.y;
     size_t tid = xIndex + yIndex * col_B;
-    const size_t numel = row_A * col_B;
-    if(tid >= numel) return;
+    if(xIndex >= col_B || yIndex >= row_A) return;
 
     Dtype tmp(0);
     for(int i = 0; i < col_A; ++i) {
@@ -32,8 +31,7 @@ __global__ void matmul_shared(const Dtype* A,
     int xIndex = threadIdx.x + blockIdx.x * blockDim.x;
     int yIndex = threadIdx.y + blockIdx.y * blockDim.y;
     size_t tid = xIndex + yIndex * col_B;
-    const size_t numel = row_A * col_B;
-    if(tid >= numel) return;
+    if(xIndex >= col_B || yIndex >= row_A) return;
 
     Dtype tmp(0);
     for(int i = 0; i < col_A / DIM; ++i) {

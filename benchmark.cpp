@@ -1,212 +1,207 @@
 #include <benchmark/benchmark.h>
-
 #include "matmul.hpp"
-#include <iostream>
 
+static void BM_cpu_naive(benchmark::State& state) {
+	const int n = static_cast<int>(state.range(0));
+	auto A = Matrix<float>::randn(n, n);
+	auto B = Matrix<float>::randn(n, n);
+	auto C = Matrix<float>::zeros(n, n);
 
-
-
-static void BM_MatmulNaive(benchmark::State& state) {
-    const int n = state.range(0);
-    auto A = Matrix<float>::randn(n, n);
-    auto B = Matrix<float>::randn(n, n);
-    auto C = Matrix<float>::zeros(n, n);
-  
-    for (auto _ : state) {
-        auto start = std::chrono::high_resolution_clock::now();
-        matmul_naive(A, B, C);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(
-                    end - start);
-
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetComplexityN(state.range(0));
+	for(auto _ : state) {
+		auto start = std::chrono::high_resolution_clock::now();
+		matmul_naive(A, B, C);
+		auto end = std::chrono::high_resolution_clock::now();
+		auto elapsed_seconds = 
+			std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+		state.SetIterationTime(elapsed_seconds.count());
+	}
+	state.SetComplexityN(state.range(0));
 }
+BENCHMARK(BM_cpu_naive)->Name("cpu-naive")
+		->RangeMultiplier(2)->Range(8, 2048)
+		->Complexity(benchmark::oN)
+		->UseManualTime()
+		->Unit(benchmark::kMicrosecond);
 
+static void BM_cpu_trans(benchmark::State& state) {
+	const int n = static_cast<int>(state.range(0));
+	auto A = Matrix<float>::randn(n, n);
+	auto B = Matrix<float>::randn(n, n);
+	auto C = Matrix<float>::zeros(n, n);
 
-
-static void BM_MatmulNaiveTrans(benchmark::State& state) {
-    const int n = state.range(0);
-    auto A = Matrix<float>::randn(n, n);
-    auto B = Matrix<float>::randn(n, n);
-    auto Bt = Matrix<float>::randn(n, n);
-    auto C = Matrix<float>::zeros(n, n);
-  
-    for (auto _ : state) {
-        auto start = std::chrono::high_resolution_clock::now();
-        int i, j;
-        for(i = 0; i < B.rows(); ++i) {
-            for(j = 0; j < B.cols(); ++j) {
-                Bt[j][i] = B[i][j];
-            }
-        }
-        matmul_trans(A, Bt, C);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(
-                    end - start);
-
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetComplexityN(state.range(0));
+	for(auto _ : state) {
+		auto start = std::chrono::high_resolution_clock::now();
+		matmul_trans(A, B.transpose(), C);
+		auto end = std::chrono::high_resolution_clock::now();
+		auto elapsed_seconds = 
+			std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+		state.SetIterationTime(elapsed_seconds.count());
+	}
+	state.SetComplexityN(state.range(0));
 }
+BENCHMARK(BM_cpu_trans)->Name("cpu-trans")
+		->RangeMultiplier(2)->Range(8, 2048)
+		->Complexity(benchmark::oN)
+		->UseManualTime()
+		->Unit(benchmark::kMicrosecond);
 
-static void BM_MatmulOpenMP(benchmark::State& state) {
-    const int n = state.range(0);
-    auto A = Matrix<float>::randn(n, n);
-    auto B = Matrix<float>::randn(n, n);
-    auto C = Matrix<float>::zeros(n, n);
-  
-    for (auto _ : state) {
-        auto start = std::chrono::high_resolution_clock::now();
-        matmul_openmp(A, B, C);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(
-                    end - start);
+static void BM_cpu_trans_block(benchmark::State& state) {
+	const int n = static_cast<int>(state.range(0));
+	auto A = Matrix<float>::randn(n, n);
+	auto B = Matrix<float>::randn(n, n);
+	auto C = Matrix<float>::zeros(n, n);
 
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetComplexityN(state.range(0));
+	for(auto _ : state) {
+		auto start = std::chrono::high_resolution_clock::now();
+		matmul_trans_block(A, B.transpose(), C);
+		auto end = std::chrono::high_resolution_clock::now();
+		auto elapsed_seconds = 
+			std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+		state.SetIterationTime(elapsed_seconds.count());
+	}
+	state.SetComplexityN(state.range(0));
 }
+BENCHMARK(BM_cpu_trans_block)->Name("cpu-trans-block")
+		->RangeMultiplier(2)->Range(8, 2048)
+		->Complexity(benchmark::oN)
+		->UseManualTime()
+		->Unit(benchmark::kMicrosecond);
 
-static void BM_MatmulSSE(benchmark::State& state) {
-    const int n = state.range(0);
-    auto A = Matrix<float>::randn(n, n);
-    auto B = Matrix<float>::randn(n, n);
-    auto Bt = Matrix<float>::randn(n, n);
-    auto C = Matrix<float>::zeros(n, n);
-  
-    for (auto _ : state) {
-        auto start = std::chrono::high_resolution_clock::now();
-        int i, j;
-        #pragma omp parallel for private(i, j)
-        for(i = 0; i < B.rows(); ++i) {
-            for(j = 0; j < B.cols(); ++j) {
-                Bt[j][i] = B[i][j];
-            }
-        }
-        matmul_omp_sse(A, Bt, C);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(
-                    end - start);
+static void BM_cpu_openmp(benchmark::State& state) {
+	const int n = static_cast<int>(state.range(0));
+	auto A = Matrix<float>::randn(n, n);
+	auto B = Matrix<float>::randn(n, n);
+	auto C = Matrix<float>::zeros(n, n);
 
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetComplexityN(state.range(0));
+	for(auto _ : state) {
+		auto start = std::chrono::high_resolution_clock::now();
+		matmul_openmp(A, B, C);
+		auto end = std::chrono::high_resolution_clock::now();
+		auto elapsed_seconds = 
+			std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+		state.SetIterationTime(elapsed_seconds.count());
+	}
+	state.SetComplexityN(state.range(0));
 }
-static void BM_MatmulAVX(benchmark::State& state) {
-    const int n = state.range(0);
-    auto A = Matrix<float>::randn(n, n);
-    auto B = Matrix<float>::randn(n, n);
-    auto Bt = Matrix<float>::randn(n, n);
-    auto C = Matrix<float>::zeros(n, n);
-  
-    for (auto _ : state) {
-        auto start = std::chrono::high_resolution_clock::now();
-        int i, j;
-        #pragma omp parallel for private(i, j)
-        for(i = 0; i < B.rows(); ++i) {
-            for(j = 0; j < B.cols(); ++j) {
-                Bt[j][i] = B[i][j];
-            }
-        }
-        matmul_omp_avx(A, Bt, C);
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(
-                    end - start);
+BENCHMARK(BM_cpu_openmp)->Name("cpu-openmp")
+		->RangeMultiplier(2)->Range(8, 2048)
+		->Complexity(benchmark::oN)
+		->UseManualTime()
+		->Unit(benchmark::kMicrosecond);
 
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetComplexityN(state.range(0));
+static void BM_cpu_omp_sse(benchmark::State& state) {
+	const int n = static_cast<int>(state.range(0));
+	auto A = Matrix<float>::randn(n, n);
+	auto B = Matrix<float>::randn(n, n);
+	auto C = Matrix<float>::zeros(n, n);
+
+	for(auto _ : state) {
+		auto start = std::chrono::high_resolution_clock::now();
+		matmul_omp_sse(A, B.transpose(), C);
+		auto end = std::chrono::high_resolution_clock::now();
+		auto elapsed_seconds = 
+			std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+		state.SetIterationTime(elapsed_seconds.count());
+	}
+	state.SetComplexityN(state.range(0));
 }
+BENCHMARK(BM_cpu_omp_sse)->Name("cpu-omp-sse")
+		->RangeMultiplier(2)->Range(8, 4096)
+		->Complexity(benchmark::oN)
+		->UseManualTime()
+		->Unit(benchmark::kMicrosecond);
 
-static void BM_MatmulCUDANaive(benchmark::State& state) {
-    const int n = state.range(0);
-    auto A = Matrix<float>::randn(n, n).cuda();
-    auto B = Matrix<float>::randn(n, n).cuda();
-    auto C = Matrix<float>::zeros(n, n).cuda();
-  
-    for (auto _ : state) {
-        auto start = std::chrono::high_resolution_clock::now();
-        matmul_cuda_naive(A, B, C);
-        cudaDeviceSynchronize();
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(
-                    end - start);
+static void BM_cpu_omp_avx(benchmark::State& state) {
+	const int n = static_cast<int>(state.range(0));
+	auto A = Matrix<float>::randn(n, n);
+	auto B = Matrix<float>::randn(n, n);
+	auto C = Matrix<float>::zeros(n, n);
 
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetComplexityN(state.range(0));
+	for(auto _ : state) {
+		auto start = std::chrono::high_resolution_clock::now();
+		matmul_omp_avx(A, B.transpose(), C);
+		auto end = std::chrono::high_resolution_clock::now();
+		auto elapsed_seconds = 
+			std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+		state.SetIterationTime(elapsed_seconds.count());
+	}
+	state.SetComplexityN(state.range(0));
 }
+BENCHMARK(BM_cpu_omp_avx)->Name("cpu-omp-avx")
+		->RangeMultiplier(2)->Range(8, 4096)
+		->Complexity(benchmark::oN)
+		->UseManualTime()
+		->Unit(benchmark::kMicrosecond);
 
-static void BM_MatmulCUDAShared(benchmark::State& state) {
-    const int n = state.range(0);
-    auto A = Matrix<float>::randn(n, n).cuda();
-    auto B = Matrix<float>::randn(n, n).cuda();
-    auto C = Matrix<float>::zeros(n, n).cuda();
-  
-    for (auto _ : state) {
-        auto start = std::chrono::high_resolution_clock::now();
-        matmul_cuda_shared(A, B, C);
-        cudaDeviceSynchronize();
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(
-                    end - start);
+static void BM_cpu_omp_avx512(benchmark::State& state) {
+	const int n = static_cast<int>(state.range(0));
+	auto A = Matrix<float>::randn(n, n);
+	auto B = Matrix<float>::randn(n, n);
+	auto C = Matrix<float>::zeros(n, n);
 
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetComplexityN(state.range(0));
+	for(auto _ : state) {
+		auto start = std::chrono::high_resolution_clock::now();
+		matmul_omp_avx512(A, B.transpose(), C);
+		auto end = std::chrono::high_resolution_clock::now();
+		auto elapsed_seconds = 
+			std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+		state.SetIterationTime(elapsed_seconds.count());
+	}
+	state.SetComplexityN(state.range(0));
 }
+BENCHMARK(BM_cpu_omp_avx512)->Name("cpu-omp-avx512")
+		->RangeMultiplier(2)->Range(8, 4096)
+		->Complexity(benchmark::oN)
+		->UseManualTime()
+		->Unit(benchmark::kMicrosecond);
 
+static void BM_cuda_naive(benchmark::State& state) {
+	const int n = static_cast<int>(state.range(0));
+	auto A = Matrix<float>::randn(n, n);
+	auto B = Matrix<float>::randn(n, n);
+	auto C = Matrix<float>::zeros(n, n);
+	 A = A.cuda(); B = B.cuda(); C = C.cuda();
 
-BENCHMARK(BM_MatmulNaive)->Name("CPU-Naive")
-            ->RangeMultiplier(2)->Range(8, 8<<8) //8, 16, 32, ..., 2k
-            ->Complexity(benchmark::oN) 
-            ->UseManualTime()
-            ->Unit(benchmark::kMicrosecond); // us
+	for(auto _ : state) {
+		auto start = std::chrono::high_resolution_clock::now();
+		matmul_cuda_naive(A, B, C);
+		cudaDeviceSynchronize();
+		auto end = std::chrono::high_resolution_clock::now();
+		auto elapsed_seconds = 
+			std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+		state.SetIterationTime(elapsed_seconds.count());
+	}
+	state.SetComplexityN(state.range(0));
+}
+BENCHMARK(BM_cuda_naive)->Name("cuda-naive")
+		->RangeMultiplier(2)->Range(8, 8192)
+		->Complexity(benchmark::oN)
+		->UseManualTime()
+		->Unit(benchmark::kMicrosecond);
 
-BENCHMARK(BM_MatmulNaiveTrans)->Name("CPU-NaiveTrans")
-            ->RangeMultiplier(2)->Range(8, 8<<8) //8, 16, 32, ..., 2k
-            ->Complexity(benchmark::oN) 
-            ->UseManualTime()
-            ->Unit(benchmark::kMicrosecond); // us
+static void BM_cuda_shared(benchmark::State& state) {
+	const int n = static_cast<int>(state.range(0));
+	auto A = Matrix<float>::randn(n, n);
+	auto B = Matrix<float>::randn(n, n);
+	auto C = Matrix<float>::zeros(n, n);
+	 A = A.cuda(); B = B.cuda(); C = C.cuda();
 
-BENCHMARK(BM_MatmulOpenMP)->Name("CPU-OpenMP")
-            ->RangeMultiplier(2)->Range(8, 8<<9) //8, 16, 32, ..., 2k, 4k
-            ->Complexity(benchmark::oN) 
-            ->UseManualTime()
-            ->Unit(benchmark::kMicrosecond); // us
-BENCHMARK(BM_MatmulSSE)->Name("CPU-OMP-SSE")
-            ->RangeMultiplier(2)->Range(8, 8<<10) //8, 16, 32, ..., 2k, 4k
-            ->Complexity(benchmark::oN) 
-            ->UseManualTime()
-            ->Unit(benchmark::kMicrosecond); // us
-
-BENCHMARK(BM_MatmulAVX)->Name("CPU-OMP-AVX")
-            ->RangeMultiplier(2)->Range(8, 8<<10) //8, 16, 32, ..., 2k, 4k
-            ->Complexity(benchmark::oN) 
-            ->UseManualTime()
-            ->Unit(benchmark::kMicrosecond); // us
-
-
-BENCHMARK(BM_MatmulCUDANaive)->Name("GPU-Naive")
-            ->RangeMultiplier(2)->Range(8, 8<<10) //8, 16, 32, ..., 2k, 4k, 8k
-            ->Complexity(benchmark::oN) 
-            ->UseManualTime()
-            ->Unit(benchmark::kMicrosecond); // us
-
-BENCHMARK(BM_MatmulCUDAShared)->Name("GPU-Shared")
-            ->RangeMultiplier(2)->Range(8, 8<<10) //8, 16, 32, ..., 2k, 4k, 8k
-            ->Complexity(benchmark::oN) 
-            ->UseManualTime()
-            ->Unit(benchmark::kMicrosecond); // us
+	for(auto _ : state) {
+		auto start = std::chrono::high_resolution_clock::now();
+		matmul_cuda_shared(A, B, C);
+		cudaDeviceSynchronize();
+		auto end = std::chrono::high_resolution_clock::now();
+		auto elapsed_seconds = 
+			std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+		state.SetIterationTime(elapsed_seconds.count());
+	}
+	state.SetComplexityN(state.range(0));
+}
+BENCHMARK(BM_cuda_shared)->Name("cuda-shared")
+		->RangeMultiplier(2)->Range(8, 8192)
+		->Complexity(benchmark::oN)
+		->UseManualTime()
+		->Unit(benchmark::kMicrosecond);
 
 
 BENCHMARK_MAIN();
