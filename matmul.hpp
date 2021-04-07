@@ -26,6 +26,7 @@ enum class Backend {
 template <typename Dtype>
 class Matrix {
 private:
+    bool _destroy {true} ;
     int _rows;
     int _cols;
     int _stride;
@@ -35,40 +36,46 @@ private:
     int* _count; 
 
     void _free() {
-       if(_data) { 
-           delete [] _data; 
-           _data = nullptr;
-       }
-       if(_d_data) {
-           CHECK_CUDA(cudaFree(_d_data));
-           _d_data = nullptr;
+       if (_destroy) {
+           if(_data) { 
+               //delete [] _data; 
+	       free(_data);
+               _data = nullptr;
+           }
+           if(_d_data) {
+               CHECK_CUDA(cudaFree(_d_data));
+               _d_data = nullptr;
+           }
        }
        delete this->_count;
     }
 public:
-    Matrix() = delete;  
+    Matrix() : _destroy(false), _rows(0), _cols(0), _stride(0), 
+	_data(nullptr), _d_data(nullptr) {
+        _count = new int(1);
+    }
     Matrix(Dtype* data, const int rows, const int cols) { // deep copy 
         _rows = rows;
         _cols = cols;
 	_stride = cols;
         _backend = Backend::CPU;
-
+	_destroy = true;
         //_data = new Dtype[rows*cols];
         _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
+	_d_data = nullptr;
         for(size_t i = 0; i < this->numel(); ++i) _data[i] = data[i]; 
-        _count = new int;
-        *_count = 1;
+        _count = new int(1);
     }
     Matrix(const int rows, const int cols) { // deep copy
         assert(rows > 0 && cols > 0);
         _rows = rows;
         _cols = cols;
 	_stride = cols;
-        //_data = new Dtype[rows*cols]; 
-        _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
         _backend = Backend::CPU;
-        _count = new int;
-        *_count = 1;
+	_destroy = true;
+        _data = static_cast<Dtype*>(aligned_alloc(32, rows*cols*sizeof(Dtype)));
+	_d_data = nullptr;
+        _count = new int(1);
     }
     Matrix(const Matrix<Dtype>& rhs) { // shadow copy
         _rows = rhs._rows;
@@ -79,6 +86,7 @@ public:
         _d_data = rhs._d_data;
         _count = rhs._count;
         (*_count) ++;
+	_destroy = rhs._destroy;
     }
     Matrix& operator=(const Matrix<Dtype>& rhs) { // shadow copy
         if (&rhs != this) {
@@ -95,17 +103,21 @@ public:
             _cols = rhs._cols;
 	    _stride = rhs._stride;
             (*_count) ++;
+	    _destroy = rhs._destroy;
         }
         return *this;
     }
     Matrix(const Matrix<Dtype>& rhs, const int x, const int y, const int w, const int h) { //sub-matrix, not deep copy
+	assert (rhs._data);
+	assert (x >= 0 && x < rhs.cols() && y >= 0 && y < rhs.rows());
+	assert (x+w <= rhs.cols() && y+h <= rhs.rows());
         _data = rhs._data + y * rhs.stride() + x;  	  
 	_rows = h;
 	_cols = w;
 	_stride = rhs.stride();
 	_backend = rhs._backend;
-	_count = new int;
-	*_count = INT_MIN+110; // the _data is impossibly be released 
+	_count = new int(1);
+	_destroy = false; // never destroy _data
     }	    
     ~Matrix() {
         if (--(*_count) == 0) {
@@ -116,7 +128,7 @@ public:
     int cols() const {return _cols;}
     int stride() const {return _stride;}
     size_t numel() const {return _rows * _cols;}
-    Dtype* data() {return _data;}
+    Dtype* data() { return _data;}
     const Dtype* data() const {return _data;}
 
     Dtype* operator[] (const int i) {
@@ -126,7 +138,7 @@ public:
         return _data + i * _stride;
     }
     Matrix<Dtype>& cuda() {
-        assert (_data != nullptr);
+        assert (_data != nullptr && _destroy); 
         if (_backend == Backend::CPU) {
             _backend = Backend::GPU;
             if (nullptr == _d_data) {
@@ -170,39 +182,98 @@ public:
         return tmp;
     }
 
+
+    void copyFrom(const Matrix<Dtype>& rhs, const int x, const int y) {
+	assert (x+rhs.cols() <= _cols && y+rhs.rows() <= _rows);
+	assert (_data);
+	int i, j;
+	#pragma omp parallel for private(i, j)
+	for(i = 0; i < rhs.rows(); ++i) {
+            for(j = 0; j < rhs.cols(); ++j) {
+                (*this)[i+y][j+x] = rhs[i][j];
+	    }
+	}
+    }
+
     Matrix<Dtype> operator-(const Matrix<Dtype>& rhs) {
         assert (this->_rows == rhs.rows() && this->_cols == rhs.cols());
         Matrix<Dtype> dst(rhs.rows(), rhs.cols());
-        for(size_t i = 0; i < rhs.rows()*rhs.cols(); ++i) {
-            dst.data()[i] = this->_data[i] - rhs.data()[i];
+	int i, j;
+        #pragma omp parallel for private(i, j)
+        for(i = 0; i < rhs.rows(); ++i) {
+	    for(j = 0; j < rhs.cols(); ++j) {
+            	dst[i][j] = (*this)[i][j] - rhs[i][j];
+	    }
         }
         return dst;
     }
-
+    Matrix<Dtype> operator+(const Matrix<Dtype>& rhs) {
+        assert (this->_rows == rhs.rows() && this->_cols == rhs.cols());
+        Matrix<Dtype> dst(rhs.rows(), rhs.cols());
+	int i, j;
+        #pragma omp parallel for private(i, j)
+        for(i = 0; i < rhs.rows(); ++i) {
+	    for(j = 0; j < rhs.cols(); ++j) {
+            	dst[i][j] = (*this)[i][j] + rhs[i][j];
+	    }
+        }
+        return dst;
+    }
+    Matrix<Dtype>& operator*=(const Dtype rhs) {
+	int i, j;
+        #pragma omp parallel for private(i, j)
+        for(i = 0; i < _rows; ++i) {
+	    for(j = 0; j < _cols; ++j) {
+            	(*this)[i][j] *= rhs;
+	    }
+        }
+        return *this;
+    }
+    Matrix<Dtype> abs() const {
+        Matrix<Dtype> dst(_rows, _cols);
+	int i, j;
+        #pragma omp parallel for private(i, j)
+	for(i = 0; i < _rows; ++i) {
+            for(j = 0; j < _cols; ++j) {
+                Dtype tmp = (*this)[i][j];
+		dst[i][j] = tmp > 0 ? tmp: -tmp;
+            }
+        }
+	return dst;
+    }
     Dtype sum() const {
         Dtype dst(0);
-        for(size_t i = 0; i < _rows * _cols; ++i) dst += _data[i];
+	for(int i = 0; i < _rows; ++i) {
+            for(int j = 0; j < _cols; ++j) {
+                dst += (*this)[i][j];
+	    }
+	}
         return dst;
     }
     Dtype max() const {
-        Dtype dst(0);
-        for(size_t i = 0; i < this->numel(); ++i) {
-            if (dst < _data[i]) dst = _data[i];
-        }
+        Dtype dst = (*this)[0][0];
+	for(int i = 0; i < _rows; ++i) {
+            for(int j = 0; j < _cols; ++j) {
+                if(dst < (*this)[i][j]) dst = (*this)[i][j];
+            }
+        }		
+	return dst;
     }
 
     Matrix<Dtype> transpose() {
         Matrix<Dtype> dst(_cols, _rows);
-        for(int i = 0; i < _rows; ++i) {
-            for(int j = 0; j < _cols; ++j) {
-                dst[j][i] = _data[i * _rows + j];
+	int i, j;
+        #pragma omp parallel for private(i, j)
+        for(i = 0; i < _rows; ++i) {
+            for(j = 0; j < _cols; ++j) {
+                dst[j][i] = (*this)[i][j];
             }
         }
         return dst;
     }
 
     friend std::ostream& operator<<(std::ostream& os, const Matrix<Dtype> & m) {
-        os << "[";
+        os << "\n[";
         for(int i = 0; i < m._rows; ++i) {
             os << "[";
             for (int j = 0; j < m._cols; ++j) {
@@ -210,10 +281,10 @@ public:
                 if (j != m._cols - 1) os << ", ";
             }
             os << "]";
-            if (i != m._rows - 1) os << "\n";
+            if (i != m._rows - 1) os << ",\n";
         }
         os << "]";
-        os << " " << m.device() ;
+        os << " device: " << m.device() ;
         return os;
     }
 
@@ -243,3 +314,5 @@ void matmul_omp_sse(const Matrix<Dtype>& A, const Matrix<Dtype>& Bt, Matrix<Dtyp
 template <typename Dtype>
 void matmul_omp_avx(const Matrix<Dtype>& A, const Matrix<Dtype>& Bt, Matrix<Dtype>& C);
 
+template <typename Dtype>
+void matmul_strassen(const Matrix<Dtype>& A, const Matrix<Dtype>& B, Matrix<Dtype>& C);
